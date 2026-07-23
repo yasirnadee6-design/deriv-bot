@@ -17,7 +17,8 @@
  *   STAKE=1
  *   DURATION_TICKS=5
  *   AUTO_TRADE=false        # set to true only after testing on demo
- */
+ */const http = require("http");
+http.createServer((req, res) => res.end("Bot is running")).listen(process.env.PORT || 3000);
 
 require("dotenv").config();
 const WebSocket = require("ws");
