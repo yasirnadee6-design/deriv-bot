@@ -168,6 +168,7 @@ function placeTrade(direction, source) {
     amount: STAKE,
     basis: "stake",
     contract_type: direction === "BUY" ? "CALL" : "PUT",
+    
     currency: account.currency,
     duration: DURATION_TICKS,
     duration_unit: "t",
@@ -177,3 +178,4 @@ function placeTrade(direction, source) {
 
 log(`starting bot — symbol=${SYMBOL} stake=${STAKE} duration=${DURATION_TICKS}t auto_trade=${AUTO_TRADE}`);
 connect();
+// trigger rebuild
