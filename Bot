@@ -1,0 +1,23 @@
+# on the server
+git clone <your repo>
+cd <folder>
+npm install
+cp .env.example .env        # then edit .env with your real token
+npm install -g pm2
+pm2 start signal-bot-server.js --name deriv-bot
+pm2 save
+pm2 startup                 # follow the printed instructions so it survives reboots
+{
+  "name": "deriv-signal-bot",
+  "version": "1.0.0",
+  "main": "signal-bot-server.js",
+  "dependencies": {
+    "ws": "^8.18.0",
+    "dotenv": "^16.4.5"
+  }
+}DERIV_TOKEN=
+DERIV_APP_ID=1089
+SYMBOL=R_100
+STAKE=1
+DURATION_TICKS=5
+AUTO_TRADE=false
