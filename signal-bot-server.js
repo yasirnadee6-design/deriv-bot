@@ -1,3 +1,4 @@
+    // Deriv 24/7 auto-trade bot v4 -- robust response parsing, logs raw API responses
 // Deriv 24/7 auto-trade bot -- uses Deriv new REST + OTP auth flow
 // Setup: npm init -y && npm install ws dotenv
 // Then: node signal-bot-server.js
@@ -28,6 +29,16 @@ function log(...args) {
 // ---------------------------------------------------------------------------
 // Step 1 + 2: REST calls to get an account and then an OTP WebSocket URL
 // ---------------------------------------------------------------------------
+async function safeJson(res) {
+  const text = await res.text();
+  log(`raw response (status ${res.status}):`, text.slice(0, 500));
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error(`response was not JSON (status ${res.status}): ${text.slice(0, 200)}`);
+  }
+}
+
 async function getAccounts() {
   const res = await fetch(`${REST_BASE}/accounts`, {
     headers: {
@@ -35,11 +46,13 @@ async function getAccounts() {
       "Authorization": `Bearer ${TOKEN}`,
     },
   });
-  const body = await res.json();
+  const body = await safeJson(res);
   if (!res.ok) {
     throw new Error(`accounts request failed (${res.status}): ${JSON.stringify(body)}`);
   }
-  return Array.isArray(body.data) ? body.data : [body.data];
+  // handle whichever shape the API actually returns
+  const list = body.accounts || body.data || body;
+  return Array.isArray(list) ? list : [list];
 }
 
 async function getWsUrl(accountId) {
@@ -48,13 +61,15 @@ async function getWsUrl(accountId) {
     headers: {
       "Deriv-App-ID": APP_ID,
       "Authorization": `Bearer ${TOKEN}`,
+      "Content-Type": "application/json",
     },
   });
-  const body = await res.json();
+  const body = await safeJson(res);
   if (!res.ok) {
     throw new Error(`otp request failed (${res.status}): ${JSON.stringify(body)}`);
   }
-  return body.data.url;
+  // handle whichever shape the API actually returns
+  return body.ws_url || body.url || (body.data && body.data.url);
 }
 
 // ---------------------------------------------------------------------------
@@ -98,10 +113,13 @@ async function connect() {
     const accounts = await getAccounts();
     log("accounts:", accounts.map((a) => `${a.account_id}(${a.account_type})`).join(", "));
 
-    const chosen = accounts.find((a) => a.account_type === ACCOUNT_TYPE) || accounts[0];
+    log("accounts raw:", JSON.stringify(accounts));
+    const accType = (a) => a.account_type || a.accountType || a.type || "";
+    const accId = (a) => a.account_id || a.accountId || a.id || a.loginid;
+    const chosen = accounts.find((a) => accType(a).toLowerCase() === ACCOUNT_TYPE) || accounts[0];
     if (!chosen) throw new Error("no accounts returned");
-    account = { id: chosen.account_id, currency: chosen.currency || "USD", is_demo: chosen.account_type === "demo" };
-    log(`using account ${account.id} (${chosen.account_type}), balance ${chosen.balance} ${account.currency}`);
+    account = { id: accId(chosen), currency: chosen.currency || "USD", is_demo: accType(chosen).toLowerCase() === "demo" };
+    log(`using account ${account.id} (${accType(chosen)}), balance ${chosen.balance} ${account.currency}`);
 
     log("requesting OTP / websocket url…");
     const wsUrl = await getWsUrl(account.id);
