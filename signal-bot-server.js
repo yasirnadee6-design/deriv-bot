@@ -1,26 +1,7 @@
-/// ---/**
- * Deriv 24/7 auto-trade bot — updated for Deriv's new REST + OTP auth flow.
- * ----------------------------------------------------------------
- * Old flow (deprecated): connect WebSocket, send {authorize: TOKEN}.
- * New flow:
- *   1. GET  /trading/v1/options/accounts            -> list of accounts
- *   2. POST /trading/v1/options/accounts/{id}/otp    -> one-time WebSocket URL
- *   3. Connect directly to that URL (no further auth message needed)
- *
- * SETUP
- *   npm init -y
- *   npm install ws dotenv
- *   node signal-bot-server.js
- *
- * .env file next to this script:
- *   DERIV_TOKEN=your_personal_access_token   # starts with pat_
- *   DERIV_APP_ID=1089
- *   ACCOUNT_TYPE=demo        # "demo" or "real"
- *   SYMBOL=R_100
- *   STAKE=1
- *   DURATION_TICKS=5
- *   AUTO_TRADE=false
- */
+// Deriv 24/7 auto-trade bot -- uses Deriv new REST + OTP auth flow
+// Setup: npm init -y && npm install ws dotenv
+// Then: node signal-bot-server.js
+// .env needs: DERIV_TOKEN, DERIV_APP_ID, ACCOUNT_TYPE, SYMBOL, STAKE, DURATION_TICKS, AUTO_TRADE
 
 require("dotenv").config();
 const WebSocket = require("ws");
@@ -216,5 +197,3 @@ function placeTrade(direction, source) {
 
 log(`starting bot — symbol=${SYMBOL} stake=${STAKE} duration=${DURATION_TICKS}t account_type=${ACCOUNT_TYPE} auto_trade=${AUTO_TRADE}`);
 connect();
--------------------------------------------------------------------
-
