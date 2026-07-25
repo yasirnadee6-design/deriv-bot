@@ -6,6 +6,7 @@
 
 require("dotenv").config();
 const WebSocket = require("ws");
+const http = require("http");
 
 const TOKEN = process.env.DERIV_TOKEN;
 const APP_ID = process.env.DERIV_APP_ID || "1089";
@@ -25,6 +26,77 @@ if (!TOKEN) {
 function log(...args) {
   console.log(`[${new Date().toISOString()}]`, ...args);
 }
+
+// ---------------------------------------------------------------------------
+// Dashboard: tiny built-in web page showing live status + trade history
+// ---------------------------------------------------------------------------
+const state = {
+  status: "starting",
+  accountId: null,
+  balance: null,
+  currency: null,
+  lastPrice: null,
+  bbSignal: "HOLD",
+  rsiSignal: "HOLD",
+  trades: [], // {time, direction, source, contractId, status, profit}
+};
+
+function renderDashboard() {
+  const rows = state.trades.slice(-30).reverse().map((t) => `
+    <tr>
+      <td>${t.time}</td>
+      <td style="color:${t.direction === "BUY" ? "#35C97A" : "#F0553C"}">${t.direction}</td>
+      <td>${t.source}</td>
+      <td>${t.contractId || "-"}</td>
+      <td>${t.status}</td>
+      <td style="color:${t.profit == null ? "#888" : t.profit >= 0 ? "#35C97A" : "#F0553C"}">${t.profit == null ? "-" : t.profit}</td>
+    </tr>`).join("");
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta http-equiv="refresh" content="5">
+<title>Deriv Signal Bot</title>
+<style>
+  body { background:#0B1220; color:#E7ECF5; font-family: ui-monospace, monospace; padding: 20px; }
+  h1 { color:#E8B34C; font-size: 20px; }
+  .card { background:#121B2E; border:1px solid #2A3852; border-radius:8px; padding:16px; margin-bottom:16px; }
+  .label { color:#6B7A99; font-size:12px; }
+  table { width:100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid #2A3852; }
+  th { color:#6B7A99; }
+</style></head>
+<body>
+  <h1>Deriv Signal Bot</h1>
+  <div class="card">
+    <div class="label">STATUS</div>
+    <div>${state.status}</div>
+  </div>
+  <div class="card">
+    <div class="label">ACCOUNT</div>
+    <div>${state.accountId || "-"} · balance ${state.balance ?? "-"} ${state.currency || ""}</div>
+  </div>
+  <div class="card">
+    <div class="label">LAST PRICE (${SYMBOL})</div>
+    <div>${state.lastPrice ?? "-"}</div>
+  </div>
+  <div class="card">
+    <div class="label">SIGNALS</div>
+    <div>15s/BB: <b>${state.bbSignal}</b> &nbsp; 1m/RSI: <b>${state.rsiSignal}</b></div>
+  </div>
+  <div class="card">
+    <div class="label">RECENT TRADES</div>
+    <table>
+      <tr><th>Time</th><th>Dir</th><th>Source</th><th>Contract</th><th>Status</th><th>Profit</th></tr>
+      ${rows || '<tr><td colspan="6">No trades yet.</td></tr>'}
+    </table>
+  </div>
+  <div class="label">auto-refreshes every 5s</div>
+</body></html>`;
+}
+
+http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "text/html" });
+  res.end(renderDashboard());
+}).listen(process.env.PORT || 3000, () => log(`dashboard listening on port ${process.env.PORT || 3000}`));
 
 // ---------------------------------------------------------------------------
 // Step 1 + 2: REST calls to get an account and then an OTP WebSocket URL
@@ -120,6 +192,10 @@ async function connect() {
     if (!chosen) throw new Error("no accounts returned");
     account = { id: accId(chosen), currency: chosen.currency || "USD", is_demo: accType(chosen).toLowerCase() === "demo" };
     log(`using account ${account.id} (${accType(chosen)}), balance ${chosen.balance} ${account.currency}`);
+    state.accountId = account.id;
+    state.balance = chosen.balance;
+    state.currency = account.currency;
+    state.status = "fetching OTP...";
 
     log("requesting OTP / websocket url…");
     const wsUrl = await getWsUrl(account.id);
@@ -127,11 +203,13 @@ async function connect() {
     ws = new WebSocket(wsUrl);
     ws.on("open", () => {
       log("connected via OTP — subscribing to ticks…");
+      state.status = "connected, watching " + SYMBOL;
       send({ ticks: SYMBOL, subscribe: 1 });
     });
     ws.on("message", (raw) => handle(JSON.parse(raw)));
     ws.on("close", () => {
       log("disconnected — reconnecting in 5s…");
+      state.status = "disconnected, reconnecting...";
       setTimeout(connect, 5000);
     });
     ws.on("error", (err) => log("ws error:", err.message));
@@ -157,6 +235,7 @@ function handle(data) {
     case "tick":
       prices.push(data.tick.quote);
       if (prices.length > 200) prices.shift();
+      state.lastPrice = data.tick.quote;
       evaluateSignals();
       break;
 
@@ -164,18 +243,30 @@ function handle(data) {
       send({ buy: data.proposal.id, price: data.proposal.ask_price });
       break;
 
-    case "buy":
+    case "buy": {
       log(`BOUGHT contract ${data.buy.contract_id} — price ${data.buy.buy_price}, payout ${data.buy.payout}`);
       pending = false;
+      const t = state.trades.find((x) => x.status === "buying");
+      if (t) {
+        t.status = "open";
+        t.contractId = data.buy.contract_id;
+      }
       send({ proposal_open_contract: 1, contract_id: data.buy.contract_id, subscribe: 1 });
       break;
+    }
 
-    case "proposal_open_contract":
+    case "proposal_open_contract": {
       if (data.proposal_open_contract.is_sold) {
         const p = data.proposal_open_contract.profit;
         log(`CONTRACT ${data.proposal_open_contract.contract_id} closed — ${p >= 0 ? "WON" : "LOST"} (${p})`);
+        const t = state.trades.find((x) => x.contractId === data.proposal_open_contract.contract_id);
+        if (t) {
+          t.status = p >= 0 ? "won" : "lost";
+          t.profit = p;
+        }
       }
       break;
+    }
 
     default:
       break;
@@ -195,12 +286,22 @@ function evaluateSignals() {
     else if (rsiSignal !== "HOLD" && rsiSignal !== lastSignal.rsi) placeTrade(rsiSignal, "1m/RSI");
   }
 
+  state.bbSignal = bbSignal;
+  state.rsiSignal = rsiSignal;
   lastSignal = { bb: bbSignal, rsi: rsiSignal };
 }
 
 function placeTrade(direction, source) {
   pending = true;
   log(`SIGNAL (${source}): ${direction} — requesting proposal…`);
+  state.trades.push({
+    time: new Date().toLocaleTimeString(),
+    direction,
+    source,
+    contractId: null,
+    status: "buying",
+    profit: null,
+  });
   send({
     proposal: 1,
     amount: STAKE,
