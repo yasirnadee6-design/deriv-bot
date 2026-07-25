@@ -1,4 +1,4 @@
-    // Deriv 24/7 auto-trade bot v4 -- robust response parsing, logs raw API responses
+// Deriv 24/7 auto-trade bot v4 -- robust response parsing, logs raw API responses
 // Deriv 24/7 auto-trade bot -- uses Deriv new REST + OTP auth flow
 // Setup: npm init -y && npm install ws dotenv
 // Then: node signal-bot-server.js
@@ -209,7 +209,7 @@ function placeTrade(direction, source) {
     currency: account.currency,
     duration: DURATION_TICKS,
     duration_unit: "t",
-    symbol: SYMBOL,
+    underlying_symbol: SYMBOL,
   });
 }
 
